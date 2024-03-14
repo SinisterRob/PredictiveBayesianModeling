@@ -8,6 +8,7 @@ library(showtext)
 library(flextable)
 library(GGally)
 library(mice)
+library(cars)
 showtext_auto()
 
 #data
@@ -38,7 +39,27 @@ ggplot(ship, aes(x = Age)) +
 ggpairs(ship[,.(Age,RoomService,FoodCourt,ShoppingMall,Spa,VRDeck,Transported)])
 
 # Seems like none of the predictors are particularly correlated with one another
-#Let's build a linear regression model with all the predictors
+
+#splitting Cabin and imputing data
+setDT(ship)
+ship[, c("deck", "num", "side") := tstrsplit(Cabin, "/", fixed = TRUE)]
+ship <- ship[,-c("Cabin")]
+ship$Transported <- as.numeric(ship$Transported)
+
+ship_transported <- ship$Transported
+ship_no_transported <- ship[, -"Transported"]
+
+imputed_ship <- mice(ship_no_transported, m = 1, printFlag = FALSE)
+imputed_ship_data <- complete(imputed_ship, 1)
+imputed_ship_data$Transported <- ship_transported
+imputed_ship_data <-
+  imputed_ship_data %>% 
+  mutate(HomePlanet = factor(HomePlanet, levels = unique(HomePlanet)),
+         VIP = factor(VIP, levels = unique(VIP)), deck = factor(deck), 
+         num = factor(num), side = factor(side))
 
 
+#Let's build a glm with all the predictors
 
+model <- glm(Transported ~ HomePlanet + CryoSleep + side + deck + Destination + VIP + Age + RoomService + FoodCourt + ShoppingMall + Spa + VRDeck,
+             data = imputed_ship_data, family = binomial(link = "logit"))
