@@ -9,47 +9,25 @@ library(flextable)
 library(GGally)
 library(mice)
 library(cars)
+library(caret)
 showtext_auto()
 
 #data
 ship <- data.table::fread("../data/Spaceship_Titanic/train.csv")
 
-#look at overall stats
-ship[,.N]
-ship[,.N,by = Transported]
-ship[,.N,by = Destination]
-
-#seems like Cabin has a certain format - let's take a look
-ship[,length(PassengerId),Cabin]
-mem_cabin <- ship[,length(PassengerId),keyby = .(Cabin)]
-mem_cabin[order(-V1)]
-
-#Can we assume each cabin contains a single family?
-#cabin = deck/num/side, each one could have unique predictive implications
-ship <- separate(ship, Cabin, into = c("deck", "num", "side"), sep = "/")
-
-#draw some plots
-
-# Histogram of Age
-ggplot(ship, aes(x = Age)) +
-  geom_histogram(binwidth = 5, fill = "skyblue", color = "black") +
-  labs(x = "Age", y = "Frequency", title = "Histogram of Age")
-
 # Scatterplot matrix
 ggpairs(ship[,.(Age,RoomService,FoodCourt,ShoppingMall,Spa,VRDeck,Transported)])
 
-# Seems like none of the predictors are particularly correlated with one another
 
 #splitting Cabin and imputing data
-setDT(ship)
 ship[, c("deck", "num", "side") := tstrsplit(Cabin, "/", fixed = TRUE)]
 ship <- ship[,-c("Cabin")]
 ship$Transported <- as.numeric(ship$Transported)
 
 ship_transported <- ship$Transported
-ship_no_transported <- ship[, -"Transported"]
+ship_no_transported <- ship[, -c("PassengerId","Transported","num","Name")]
 
-imputed_ship <- mice(ship_no_transported, m = 1, printFlag = FALSE)
+imputed_ship <- mice(ship_no_transported, m = 5, printFlag = TRUE)
 imputed_ship_data <- complete(imputed_ship, 1)
 imputed_ship_data$Transported <- ship_transported
 imputed_ship_data <-
@@ -58,8 +36,75 @@ imputed_ship_data <-
          VIP = factor(VIP, levels = unique(VIP)), deck = factor(deck), 
          num = factor(num), side = factor(side))
 
-
-#Let's build a glm with all the predictors
+#glm with all predictors
 
 model <- glm(Transported ~ HomePlanet + CryoSleep + side + deck + Destination + VIP + Age + RoomService + FoodCourt + ShoppingMall + Spa + VRDeck,
              data = imputed_ship_data, family = binomial(link = "logit"))
+
+predictions <- predict(model,newdata = imputed_ship_data)
+
+
+#evaluating training error
+threshold <- 0.5
+probabilities <- plogis(predictions)
+binary_predictions <- ifelse(probabilities >= threshold, 1,0)
+
+confusionMatrix(binary_predictions, imputed_ship_data$Transported)
+
+imputed_ship_data$predictions <- binary_predictions
+(nrow(imputed_ship_data) - nrow(imputed_ship_data[Transported != predictions]))/nrow(imputed_ship_data)
+
+#----------------------------------------------------generating test predictions
+ship_test <- data.table::fread("../data/Spaceship_Titanic/test.csv")
+
+ship_test[, c("deck", "num", "side") := tstrsplit(Cabin, "/", fixed = TRUE)]
+ship_test <- ship_test[,-c("Cabin","num")]
+imputed_ship_test <- mice(ship_test, m = 1, printFlag = FALSE)
+imputed_ship_test_data <- complete(imputed_ship_test, 1)
+imputed_ship_test_data <-
+  imputed_ship_test_data %>% 
+  mutate(HomePlanet = factor(HomePlanet, levels = unique(HomePlanet)),
+         VIP = factor(VIP, levels = unique(VIP)), deck = factor(deck), 
+         num = factor(num), side = factor(side))
+
+predictions <- predict(model,newdata = imputed_ship_test_data)
+
+threshold <- 0.5
+probabilities <- plogis(predictions)
+binary_predictions <- ifelse(probabilities >= threshold, 'True', 'False')
+submission <- data.frame(PassengerId = imputed_ship_test_data$PassengerId, Transported = binary_predictions)
+write.csv(submission, "submission.csv", row.names = FALSE)
+
+
+#-------------------------------------------------using fewer predictors and not splitting
+ship <- data.table::fread("../data/Spaceship_Titanic/train.csv")
+
+ship_transported <- as.numeric(ship$Transported)
+ship_clean <- ship[, -c("PassengerId","Name")]
+imp_ship <- mice(ship_clean, m = 5, seed = 1)
+imp_ship_data <- complete(imp_ship)
+imp_ship_data <-
+  imp_ship_data %>% 
+  mutate(HomePlanet = factor(HomePlanet, levels = unique(HomePlanet)),
+         VIP = factor(VIP, levels = unique(VIP)))
+
+model <-glm(Transported ~ HomePlanet + CryoSleep + Age + RoomService + FoodCourt + ShoppingMall + Spa + VRDeck,
+                          data = imp_ship_data,family = binomial(link = "logit"))
+
+# Destination and VIP weren't significant
+summary(model)
+
+#----------------------------------------------------generating test predictions
+ship_test <- data.table::fread("../data/Spaceship_Titanic/test.csv")
+
+imputed_ship_test <- mice(ship_test, m = 1, printFlag = FALSE)
+imputed_ship_test_data <- complete(imputed_ship_test, 1)
+
+predictions <- predict(model,newdata = imputed_ship_test_data)
+
+threshold <- 0.5
+probabilities <- plogis(predictions)
+binary_predictions <- ifelse(probabilities >= threshold, 'True', 'False')
+submission <- data.frame(PassengerId = imputed_ship_test_data$PassengerId, Transported = binary_predictions)
+write.csv(submission, "submission.csv", row.names = FALSE)
+
