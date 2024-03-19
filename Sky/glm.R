@@ -77,7 +77,7 @@ write.csv(submission, "submission.csv", row.names = FALSE)
 
 
 #-------------------------------------------------using fewer predictors and not splitting
-ship <- data.table::fread("../data/Spaceship_Titanic/train.csv")
+ship <- data.table::fread("data/Spaceship_Titanic/train.csv")
 
 ship_transported <- as.numeric(ship$Transported)
 ship_clean <- ship[, -c("PassengerId","Name")]
@@ -95,7 +95,7 @@ model <-glm(Transported ~ HomePlanet + CryoSleep + Age + RoomService + FoodCourt
 summary(model)
 
 #----------------------------------------------------generating test predictions
-ship_test <- data.table::fread("../data/Spaceship_Titanic/test.csv")
+ship_test <- data.table::fread("data/Spaceship_Titanic/test.csv")
 
 imputed_ship_test <- mice(ship_test, m = 1, printFlag = FALSE)
 imputed_ship_test_data <- complete(imputed_ship_test, 1)
@@ -106,5 +106,4 @@ threshold <- 0.5
 probabilities <- plogis(predictions)
 binary_predictions <- ifelse(probabilities >= threshold, 'True', 'False')
 submission <- data.frame(PassengerId = imputed_ship_test_data$PassengerId, Transported = binary_predictions)
-write.csv(submission, "submission.csv", row.names = FALSE)
-
+write.csv(submission, "Sky/glm_noDest_noVIP.csv", row.names = FALSE)
